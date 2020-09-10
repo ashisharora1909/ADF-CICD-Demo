@@ -1,0 +1,67 @@
+# 1. Login to Azure
+az login
+
+# 2. List subscriptions in Azure
+az account list --output table
+
+# 3. Set subscription to desired subscription name under which you want to create the resources. In my case, it's Visual Studio Professional.
+az account set --subscription "Visual Studio Professional"
+
+# 4. Create resource group "RG-Ash-Dev" & "RG-Ash-Prod" and set location (Australia East)
+az group create --name RG-Ash-Dev --location AustraliaEast
+az group create --name RG-Ash-Prod --location AustraliaEast
+
+# 5. Install extension for datafactory in Azure CLI. Please note that the extension is currently experimental and not covered by customer support.
+az extension add -n datafactory
+
+# 6. Create data factory "DF-Ash-Dev" & "DF-Ash-Prod". Set location to Australia East.
+az datafactory factory create --location AustraliaEast --name DF-Ash-Dev --resource-group RG-Ash-Dev
+az datafactory factory create --location AustraliaEast --name DF-Ash-Prod --resource-group RG-Ash-Prod
+
+# 7. Configure Git Repository in Dev ADF.
+az datafactory factory configure-factory-repo --factory-resource-id "/subscriptions/1cdbc4bb-9fa1-4ee2-9724-ee86a4b46029/resourceGroups/RG-Ash-Dev/providers/Microsoft.DataFactory/factories/DF-Ash-Dev" --factory-vsts-configuration account-name="PD-AshishArora" collaboration-branch="master" last-commit-id="" project-name="ADF-CICD-Demo" repository-name="ADF-CICD-Demo" root-folder="/" tenant-id="XXTenantIdXX" --location AustraliaEast
+
+# 8. Create storage account for Dev & Prod
+az storage account create --name saashdev --resource-group RG-Ash-Dev --location AustraliaEast --sku Standard_ZRS --encryption-services blob
+az storage account create --name saashprod --resource-group RG-Ash-Prod --location AustraliaEast --sku Standard_ZRS --encryption-services blob
+
+# 9. List account keys of Storage Account. We will be need them in following steps.
+az storage account keys list --account-name saashdev --resource-group RG-Ash-Dev
+az storage account keys list --account-name saashprod --resource-group RG-Ash-Prod
+
+# 10. Create container source in storage account for Dev & Prod. This container will contain the sample flat file.
+az storage container create --account-key XXAccountKey_DEVXX --account-name saashdev --name source
+az storage container create --account-key XXAccountKey_PRODXX --account-name saashprod --name source
+
+# 11. Create Azure SQL Database Server for Dev & Prod. This will be the database server where the SQL Database will be hosted.
+az sql server create -l australiaeast -g RG-Ash-Dev -n ADBSrv-Ash-Dev -u XXUserName_DEVXX -p XXPassword_DEVXX
+az sql server create -l australiaeast -g RG-Ash-Prod -n ADBSrv-Ash-Prod -u XXUserName_PRODXX -p XXPassword_PRODXX
+
+# 12. Create Azure SQL Database for Dev & Prod. This will be the SQL Database where the destination table will get created.
+az sql db create -g RG-Ash-Dev -s ADBSrv-Ash-Dev -n ADB-Ash-Dev -e GeneralPurpose -f Gen5 -c 2 --compute-model Serverless --auto-pause-delay 60
+az sql db create -g RG-Ash-Prod -s ADBSrv-Ash-Prod -n ADB-Ash-Prod -e GeneralPurpose -f Gen5 -c 2 --compute-model Serverless --auto-pause-delay 60
+
+# 13. Create Azure Key Vault for both Dev & Prod. This will be used to store keys & secrets. Set location to AustraliaEast.
+az keyvault create --name KV-Ash-Dev --resource-group RG-Ash-Dev --location AustraliaEast
+az keyvault create --name KV-Ash-Prod --resource-group RG-Ash-Prod --location AustraliaEast
+
+# 14. Create a secret to store Storage Account Access Key in Key Vault
+az keyvault secret set --vault-name KV-Ash-Dev --name "StorageAccountKey" --value XXAccountKey_DEVXX
+az keyvault secret set --vault-name KV-Ash-Prod --name "StorageAccountKey" --value XXAccountKey_PRODXX
+
+# 15. Create a secret to store Azure SQL Database Connection String in Key Vault
+az keyvault secret set --vault-name KV-Ash-Dev --name "AzureSQLConnString" --value XXAzureSQL_ConnectionString_DEVXX
+az keyvault secret set --vault-name KV-Ash-Prod --name "AzureSQLConnString" --value XXAzureSQL_ConnectionString_PRODXX
+
+# 16. Create a service principal for Dev & Prod
+az ad sp create-for-rbac --name spn-ash-dev
+az ad sp create-for-rbac --name spn-ash-prod
+
+# 17. Create a secret to store Service Principal password generated in the previous step in Azure Key Vault for both Dev and Prod
+az keyvault secret set --vault-name KV-Ash-Dev --name "SpnPassword" --value XXSPN_Password_DEVXX
+az keyvault secret set --vault-name KV-Ash-Prod --name "SpnPassword" --value XXSPN_Password_PRODXX
+
+# 18. Give service principal access to Azure Key Vault. This will be required to retrieve secrets in Azure DevOps pipelines.
+az keyvault set-policy -n KV-Ash-Dev --spn XXappId_DEVXX --secret-permissions get list set delete --key-permissions create decrypt delete encrypt get list unwrapKey wrapKey
+az keyvault set-policy -n KV-Ash-Prod --spn XXappId_PRODXX --secret-permissions get list set delete --key-permissions create decrypt delete encrypt get list unwrapKey wrapKey
+
